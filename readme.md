@@ -9,7 +9,7 @@ This project demonstrates a simulation combining **Jolt Physics** using the **Th
 ## Getting Started
 To explore the simulation, follow the link below:
 
-[View the Simulation](#https://jolt-curtains.vercel.app/)
+[View the Simulation](https://jolt-curtains.vercel.app/)
 
 ## Requirements
 - A modern web browser with WebGL support.
