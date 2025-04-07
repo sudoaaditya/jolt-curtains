@@ -26,6 +26,8 @@ initJolt().then(function (Jolt) {
 
 	// List of objects spawned
 	var dynamicObjects = [];
+	// var rigidBodies = [];
+	// var rigidIndexes = [];
 
 	// The update function
 	var onExampleUpdate;
@@ -38,11 +40,51 @@ initJolt().then(function (Jolt) {
 	const LAYER_MOVING = 1;
 	const NUM_OBJECT_LAYERS = 2;
 
-    const width = 1;
-    const height = 1.5;
-    const segmentsMultiplier = 25;
-    const widthSegments = Math.ceil( width * segmentsMultiplier);
-    const heightSegments = 10;
+    let width = 1;
+    let height = 1.5;
+    let segmentsMultiplier = 50;
+    let widthSegments = Math.ceil( width * segmentsMultiplier);
+    let heightSegments = 10;
+
+	let planeGeo = null;
+	let mesh = null;
+
+	const tex = texLoader.load('/mask3.jpg', (texture) => {
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+
+		const xTile = Math.ceil((0.789 * widthSegments) / (widthSegments/2)) 
+		const yTile = Math.ceil((0.789 * heightSegments) / (heightSegments/2)) 
+        
+        texture.repeat.set(xTile, yTile);
+		texture.needsUpdate = true;
+    })
+    let material = new THREE.MeshStandardMaterial({map: tex, side: THREE.DoubleSide});
+
+	const params = {
+		width: width,
+		height: height,
+		wireframe: false,
+		// animate: () => animateAnchors()
+	};
+
+	gui.add(params, 'width', 1, 5, 0.01).onChange(() => {
+		width = params.width;
+		widthSegments = Math.ceil(width * segmentsMultiplier);
+		updatePlaneSize()
+	});
+
+	gui.add(params, 'height', 1, 5, 0.01).onChange(() => {
+		height = params.height;
+		updatePlaneSize()
+	});
+
+	gui.add(params, 'wireframe').onChange(() => {
+		material.wireframe = params.wireframe;
+		material.needsUpdate = true;
+	});
+
+	// gui.add(params, 'animate');
 
 	function onWindowResize() {
 
@@ -53,7 +95,6 @@ initJolt().then(function (Jolt) {
 	}
 
 	function initGraphics() {
-
 		renderer = new THREE.WebGLRenderer();
 		renderer.setClearColor(0xbfd1e5);
 		renderer.setPixelRatio(window.devicePixelRatio);
@@ -70,7 +111,6 @@ initJolt().then(function (Jolt) {
 		controls = new OrbitControls(camera, container);
 
 		container.appendChild(renderer.domElement);
-
 
 		window.addEventListener('resize', onWindowResize, false);
 	}
@@ -109,6 +149,7 @@ initJolt().then(function (Jolt) {
 		jolt = new Jolt.JoltInterface(settings);
 		Jolt.destroy(settings);
 		physicsSystem = jolt.GetPhysicsSystem();
+		physicsSystem.SetGravity(new Jolt.Vec3(0, -9.8, 0));
 		bodyInterface = physicsSystem.GetBodyInterface();
 	}
 
@@ -185,9 +226,8 @@ initJolt().then(function (Jolt) {
 		var shape = new Jolt.BoxShape(new Jolt.Vec3(size, 0.2, size), 0.05, null);
 		var creationSettings = new Jolt.BodyCreationSettings(shape, new Jolt.RVec3(0, -0.5, 0), new Jolt.Quat(0, 0, 0, 1), Jolt.EMotionType_Static, LAYER_NON_MOVING);
 		let body = bodyInterface.CreateBody(creationSettings);
-		Jolt.destroy(creationSettings);
-        let material = new THREE.MeshPhongMaterial({ color: 0xc7c7c7 });
-		addToScene(body, material);
+		Jolt.destroy(creationSettings); 
+		addToScene(body, new THREE.MeshStandardMaterial({ color: 0xc7c7c7 }));
 		return body;
 	}
 
@@ -212,24 +252,13 @@ initJolt().then(function (Jolt) {
 		return geometry;
 	}
 
-
 	function getThreeObjectForBody(body, material) {
-
 		let threeObject;
-
 		let shape = body.GetShape();
-		switch (shape.GetSubType()) {
-			case Jolt.EShapeSubType_Sphere:
-				let sphereShape = Jolt.castObject(shape, Jolt.SphereShape);
-				threeObject = new THREE.Mesh(new THREE.SphereGeometry(sphereShape.GetRadius(), 32, 32), material);
-				break;
-			default:
-				if (body.GetBodyType() == Jolt.EBodyType_SoftBody)
-					threeObject = getSoftBodyMesh(body, material);
-				else
-					threeObject = new THREE.Mesh(createMeshForShape(shape), material);
-				break;
-		}
+		if (body.GetBodyType() == Jolt.EBodyType_SoftBody)
+			threeObject = getSoftBodyMesh(body, material);
+		else
+			threeObject = new THREE.Mesh(createMeshForShape(shape), material);
 
 		threeObject.position.copy(wrapVec3(body.GetPosition()));
 		threeObject.quaternion.copy(wrapQuat(body.GetRotation()));
@@ -246,129 +275,219 @@ initJolt().then(function (Jolt) {
         }
         return roundedFrequency;
     }
+
+	function vertexIndex(x, y) {
+		return x + y * widthSegments;
+	} 
+
+	function updateGeometry(planeGeo){
+		const posAttr = planeGeo.getAttribute('position');
+		const frequency = getFrequency(width);
+		const totalWaveLength = frequency * 2 * Math.PI;
+		const waveStepSize = totalWaveLength / (widthSegments + 1);
+		const waveAmplitude = 0.05;
+		
+		let sineWaveInput = 0;
+		const numVerticesX = widthSegments + 1;
+		const numVerticesY = heightSegments + 1;
+		for (let ix = 0; ix < numVerticesX; ix++) {
+			const z = waveAmplitude * Math.sin(sineWaveInput - Math.PI/2);
+			for (let iy = 0; iy < numVerticesY; iy++) {
+				const index = ix + iy * numVerticesX;
+				posAttr.setZ(index, z);
+			}
+			sineWaveInput = waveStepSize * (ix + 1);
+		}
+	
+		posAttr.needsUpdate = true;
+	}
+
+	function createAnchor(position, count) {
+		const radius = 0.001;
+		const bodies = [];
+
+		const aX = position.x - width/2;
+		const aY = position.y + height/2;
+		const aZ = position.z;
+
+		// const shape = new Jolt.BoxShape(new Jolt.Vec3(0.0, 0.0, 0.0), 0.01, null); // size, convex radius
+		const shape = new Jolt.SphereShape(radius);
+
+		for(var i = 0; i < count; i++) {
+
+			// 2. Create body settings (static or dynamic)
+			const sphereSettings = new Jolt.BodyCreationSettings(
+				shape,
+				new Jolt.RVec3(aX + (i/widthSegments), aY, aZ), // position
+				Jolt.Quat.prototype.sIdentity(), // rotation
+				Jolt.EMotionType_Static, // use Dynamic if you want it to move
+				LAYER_MOVING
+			);
+
+			// 3. Create and add to physics world
+			const sphereBody = bodyInterface.CreateBody(sphereSettings);
+			bodyInterface.AddBody(sphereBody.GetID(), Jolt.EActivation_Activate);
+
+			bodies.push(sphereBody);
+		}
+
+		return bodies;
+	}
+
+	function createPhysicsForCloth(planeGeo) {
+		const posAttr = planeGeo.getAttribute('position');
+		const vertices = [];
+		for (let i = 0; i < posAttr.count; i++) {
+			const x = posAttr.getX(i);
+			const y = posAttr.getY(i);
+			const z = posAttr.getZ(i);
+
+			const v = new Jolt.SoftBodySharedSettingsVertex();
+			v.mPosition = new Jolt.Float3(x, y, z);
+			vertices.push(v);
+		}
+
+		const indexAttr = planeGeo.index;
+		const faces = [];
+		for (let i = 0; i < indexAttr.count; i += 3) {
+			const v0 = indexAttr.getX(i);
+			const v1 = indexAttr.getX(i + 1);
+			const v2 = indexAttr.getX(i + 2);
+
+			const face = new Jolt.SoftBodySharedSettingsFace(v0, v1, v2, 0); // material index = 0
+			faces.push(face);
+		}
+
+		let sharedSettings = new Jolt.SoftBodySharedSettings;
+		vertices.forEach(v => sharedSettings.mVertices.push_back(v));
+		faces.forEach(f => sharedSettings.AddFace(f));
+
+		// Create edges
+		const attributes = new Jolt.SoftBodySharedSettingsVertexAttributes();
+		attributes.mCompliance = compliance;
+		attributes.mShearCompliance = compliance;
+		attributes.mBendCompliance = 0.001;  
+		sharedSettings.CreateConstraints(attributes, 1);
+
+		for(var i = 0; i < widthSegments + 1; i++) {
+			sharedSettings.mVertices.at(vertexIndex(i, 0)).mInvMass = 0.0;
+		}
+
+		// Optimize shared settings
+		sharedSettings.Optimize();
+
+		// new Jolt.Quat( 0.7071068, 0, 0, 0.7071068)
+		// new Jolt.Quat( -0.3826834, 0, 0, 0.9238795 )
+
+		// Create soft body
+		let bodyCreationSettings = new Jolt.SoftBodyCreationSettings(
+			sharedSettings, 
+			new Jolt.RVec3(0, 0.4, 0), 
+			Jolt.Quat.prototype.sIdentity()
+			// new Jolt.Quat( 0.7071068, 0, 0, 0.7071068)
+		);
+
+		bodyCreationSettings.mObjectLayer = LAYER_MOVING;
+		bodyCreationSettings.mUpdatePosition = false;
+		let body = bodyInterface.CreateSoftBody(bodyCreationSettings);
+
+		/*rigidBodies.splice(0, rigidBodies.length)
+		rigidIndexes.splice(0, rigidIndexes.length)
+
+		rigidBodies = createAnchor(new THREE.Vector3(0, 0.4, 0), widthSegments+1);
+
+		for(var i = 0; i < widthSegments + 1; i++) {
+			sharedSettings.mVertices.at(vertexIndex(i, 0)).mInvMass = 0.0;
+			const idx = vertexIndex(i, 0);
+			rigidIndexes.push(idx)
+			sharedSettings.mVertices.at(idx).mPosition = rigidBodies[i].GetPosition();
+		} */
+
+		return body;
+	}
+
+	function updateVertexSettings(body, mesh) {
+		// update function!
+		const motionProperties = Jolt.castObject(body.GetMotionProperties(), Jolt.SoftBodyMotionProperties);
+		const vertexSettings = motionProperties.GetVertices();
+		const positionOffset = Jolt.SoftBodyVertexTraits.prototype.mPositionOffset;
+	
+		// Get a view on the triangle data
+		const softVertex = [];
+		for (let i = 0; i < vertexSettings.size(); i++) {
+			softVertex.push(new Float32Array(Jolt.HEAP32.buffer, Jolt.getPointer(vertexSettings.at(i)) + positionOffset, 3));
+		}
+	
+		// Create a three mesh
+		let verts = mesh.geometry.getAttribute('position');
+	
+		mesh.userData.updateVertex = () => {
+
+			/* rigidIndexes.forEach((idx, i) => {
+				const vertex = motionProperties.GetVertex(idx);
+				const rigidBodyPosition = rigidBodies[i].GetPosition();
+
+				vertex.mPosition = rigidBodyPosition;
+			}) */
+
+			for (let i = 0; i < softVertex.length; i++) {
+				verts.setX(i, softVertex[i][0]);
+				verts.setY(i, softVertex[i][1]);
+				verts.setZ(i, softVertex[i][2]);
+			}
+			mesh.geometry.computeVertexNormals();
+			mesh.geometry.getAttribute('position').needsUpdate = true;
+			mesh.geometry.getAttribute('normal').needsUpdate = true;
+		}
+		mesh.userData.updateVertex();
+	}
+
+	function createSoftCloth() {
+		planeGeo = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
+
+		updateGeometry(planeGeo);
+		let body = createPhysicsForCloth(planeGeo);
+	
+		mesh = new THREE.Mesh(planeGeo, material)
+		mesh.position.copy(wrapVec3(body.GetPosition()));
+		mesh.quaternion.copy(wrapQuat(body.GetRotation()));
+
+		updateVertexSettings(body, mesh)
+		addToScene(body, material, mesh );
+	}
+
+	function updatePlaneSize() {
+		mesh.geometry.dispose();
+
+		widthSegments = Math.ceil( width * segmentsMultiplier);
+
+		planeGeo = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
+        mesh.geometry = planeGeo;
+		updateGeometry(planeGeo);
+
+		const xTile = Math.ceil((0.789 * widthSegments) / (widthSegments/2)) 
+		const yTile = Math.ceil((0.789 * heightSegments) / (heightSegments/2)) 
+        
+        mesh.material.map.repeat.set(xTile, yTile);
+		mesh.material.map.needsUpdate = true;
+
+		let body = createPhysicsForCloth(planeGeo);
+		mesh.userData.body = body;
+
+		bodyInterface.AddBody(body.GetID(), Jolt.EActivation_Activate);
+		updateVertexSettings(body, mesh)
+	}
+
+	function disposeSoftbody() {
+
+	}
+
 	// Initialize this example
 	initExample(Jolt, () => { });
 
 	// Create a basic floor
 	createFloor();
 
-	// Create shared settings
-	let sharedSettings = new Jolt.SoftBodySharedSettings;
-    const planeGeo = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
-
-    const posAttr = planeGeo.getAttribute('position');
-
-    const frequency = getFrequency(width);
-    const totalWaveLength = frequency * 2 * Math.PI;
-    const waveStepSize = totalWaveLength / (widthSegments + 1);
-    const waveAmplitude = 0.05;
-        
-    let sineWaveInput = 0;
-    const numVerticesX = widthSegments + 1;
-    const numVerticesY = heightSegments + 1;
-    for (let ix = 0; ix < numVerticesX; ix++) {
-        const z = waveAmplitude * Math.sin(sineWaveInput - Math.PI/2);
-        for (let iy = 0; iy < numVerticesY; iy++) {
-            // Calculate the index in the flat position array
-            const index = ix + iy * numVerticesX;
-
-            posAttr.setZ(index, z);
-        }
-        sineWaveInput = waveStepSize * (ix + 1);
-    }
-
-        posAttr.needsUpdate = true;
-
-    const vertices = [];
-    for (let i = 0; i < posAttr.count; i++) {
-        const x = posAttr.getX(i);
-        const y = posAttr.getY(i);
-        const z = posAttr.getZ(i);
-
-        const v = new Jolt.SoftBodySharedSettingsVertex();
-        v.mPosition = new Jolt.Float3(x, y, z);
-        vertices.push(v);
-    }
-
-    const indexAttr = planeGeo.index;
-    const faces = [];
-
-    for (let i = 0; i < indexAttr.count; i += 3) {
-        const v0 = indexAttr.getX(i);
-        const v1 = indexAttr.getX(i + 1);
-        const v2 = indexAttr.getX(i + 2);
-
-        const face = new Jolt.SoftBodySharedSettingsFace(v0, v1, v2, 0); // material index = 0
-        faces.push(face);
-    }
-
-    vertices.forEach(v => sharedSettings.mVertices.push_back(v));
-    faces.forEach(f => sharedSettings.AddFace(f));
-
-    for(var i = 0; i <= widthSegments; i++) {
-        sharedSettings.mVertices.at(i).mInvMass = 0.0;
-    }
-
-    // Create edges
-	const attributes = new Jolt.SoftBodySharedSettingsVertexAttributes();
-	attributes.mCompliance = compliance;
-	attributes.mShearCompliance = compliance;
-	sharedSettings.CreateConstraints(attributes, 1);
-
-    // Optimize shared settings
-	sharedSettings.Optimize();
-
-    // new Jolt.Quat( 0.7071068, 0, 0, 0.7071068)
-    // new Jolt.Quat( -0.3826834, 0, 0, 0.9238795 )
-
-	// Create soft body
-	let bodyCreationSettings = new Jolt.SoftBodyCreationSettings(
-        sharedSettings, 
-        new Jolt.RVec3(0, 0.4, 0), 
-        Jolt.Quat.prototype.sIdentity()
-    );
-
-	bodyCreationSettings.mObjectLayer = LAYER_MOVING;
-	bodyCreationSettings.mUpdatePosition = false;
-	let body = bodyInterface.CreateSoftBody(bodyCreationSettings);
-
-    const tex = texLoader.load('/mask3.jpg', (texture) => {
-        texture.wrapS = THREE.RepeatWrapping;
-        texture.wrapT = THREE.RepeatWrapping;
-        
-        texture.repeat.set(4, 4)
-    })
-    let material = new THREE.MeshStandardMaterial({map: tex, side: THREE.DoubleSide});
-
-    const mesh = new THREE.Mesh(planeGeo, material)
-    mesh.position.copy(wrapVec3(body.GetPosition()));
-    mesh.quaternion.copy(wrapQuat(body.GetRotation()));
-
-    const motionProperties = Jolt.castObject(body.GetMotionProperties(), Jolt.SoftBodyMotionProperties);
-    const vertexSettings = motionProperties.GetVertices();
-    const positionOffset = Jolt.SoftBodyVertexTraits.prototype.mPositionOffset;
-
-    // Get a view on the triangle data
-    const softVertex = [];
-    for (let i = 0; i < vertexSettings.size(); i++) {
-        softVertex.push(new Float32Array(Jolt.HEAP32.buffer, Jolt.getPointer(vertexSettings.at(i)) + positionOffset, 3));
-    }
-
-    // Create a three mesh
-    let verts = mesh.geometry.getAttribute('position');
-
-    mesh.userData.updateVertex = () => {
-        for (let i = 0; i < softVertex.length; i++) {
-            verts.setX(i, softVertex[i][0]);
-            verts.setY(i, softVertex[i][1]);
-            verts.setZ(i, softVertex[i][2]);
-        }
-        mesh.geometry.computeVertexNormals();
-        mesh.geometry.getAttribute('position').needsUpdate = true;
-        mesh.geometry.getAttribute('normal').needsUpdate = true;
-    }
-    mesh.userData.updateVertex();
-
-    addToScene(body, material, mesh );
-
+	// create soft cloth
+    createSoftCloth();
 });
