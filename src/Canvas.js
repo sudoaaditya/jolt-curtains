@@ -23,9 +23,12 @@ initJolt().then(function (Jolt) {
 	var jolt;
 	var physicsSystem;
 	var bodyInterface;
+	let body;
 
 	// List of objects spawned
 	var dynamicObjects = [];
+	var fixedVertices = [];
+	var initialPositions = [];
 	// var rigidBodies = [];
 	// var rigidIndexes = [];
 
@@ -65,7 +68,8 @@ initJolt().then(function (Jolt) {
 		width: width,
 		height: height,
 		wireframe: false,
-		// animate: () => animateAnchors()
+		openCurtain: () => moveLeft(),
+		closeCurtain: () => moveLeft(false)
 	};
 
 	gui.add(params, 'width', 1, 5, 0.01).onChange(() => {
@@ -84,7 +88,8 @@ initJolt().then(function (Jolt) {
 		material.needsUpdate = true;
 	});
 
-	// gui.add(params, 'animate');
+	gui.add(params, 'openCurtain');
+	gui.add(params, 'closeCurtain');
 
 	function onWindowResize() {
 
@@ -149,12 +154,11 @@ initJolt().then(function (Jolt) {
 		jolt = new Jolt.JoltInterface(settings);
 		Jolt.destroy(settings);
 		physicsSystem = jolt.GetPhysicsSystem();
-		physicsSystem.SetGravity(new Jolt.Vec3(0, -9.8, 0));
+		// physicsSystem.SetGravity(new Jolt.Vec3(0, -9.8, 0));
 		bodyInterface = physicsSystem.GetBodyInterface();
 	}
 
 	function updatePhysics(deltaTime) {
-
 		// When running below 55 Hz, do 2 steps instead of 1
 		var numSteps = deltaTime > 1.0 / 55.0 ? 2 : 1;
 
@@ -188,15 +192,15 @@ initJolt().then(function (Jolt) {
 		// Update object transforms
 		for (let i = 0, il = dynamicObjects.length; i < il; i++) {
 			let objThree = dynamicObjects[i];
-			let body = objThree.userData.body;
-			objThree.position.copy(wrapVec3(body.GetPosition()));
-			objThree.quaternion.copy(wrapQuat(body.GetRotation()));
+			let renderBody = objThree.userData.body;
+			objThree.position.copy(wrapVec3(renderBody.GetPosition()));
+			objThree.quaternion.copy(wrapQuat(renderBody.GetRotation()));
 
-			if (body.GetBodyType() == Jolt.EBodyType_SoftBody) {
+			if (renderBody.GetBodyType() == Jolt.EBodyType_SoftBody) {
 				if (objThree.userData.updateVertex) {
 					objThree.userData.updateVertex();
 				} else {
-					objThree.geometry = createMeshForShape(body.GetShape());
+					objThree.geometry = createMeshForShape(renderBody.GetShape());
 				}
 			}
 		}
@@ -225,10 +229,10 @@ initJolt().then(function (Jolt) {
 	function createFloor(size = 5) {
 		var shape = new Jolt.BoxShape(new Jolt.Vec3(size, 0.2, size), 0.05, null);
 		var creationSettings = new Jolt.BodyCreationSettings(shape, new Jolt.RVec3(0, -0.5, 0), new Jolt.Quat(0, 0, 0, 1), Jolt.EMotionType_Static, LAYER_NON_MOVING);
-		let body = bodyInterface.CreateBody(creationSettings);
+		let floorBody = bodyInterface.CreateBody(creationSettings);
 		Jolt.destroy(creationSettings); 
-		addToScene(body, new THREE.MeshStandardMaterial({ color: 0xc7c7c7 }));
-		return body;
+		addToScene(floorBody, new THREE.MeshStandardMaterial({ color: 0xc7c7c7 }));
+		return floorBody;
 	}
 
 	function createMeshForShape(shape) {
@@ -366,12 +370,21 @@ initJolt().then(function (Jolt) {
 		const attributes = new Jolt.SoftBodySharedSettingsVertexAttributes();
 		attributes.mCompliance = compliance;
 		attributes.mShearCompliance = compliance;
-		attributes.mBendCompliance = 0.001;  
+		// attributes.mBendCompliance = 0.001;  
 		sharedSettings.CreateConstraints(attributes, 1);
 
+		fixedVertices.splice(0, fixedVertices.length)
+		initialPositions.splice(0, initialPositions.length)
+
 		for(var i = 0; i < widthSegments + 1; i++) {
-			sharedSettings.mVertices.at(vertexIndex(i, 0)).mInvMass = 0.0;
+			const index = vertexIndex(i, 0)
+			sharedSettings.mVertices.at(index).mInvMass = 0.0;
+			fixedVertices.push(index);
 		}
+
+		initialPositions = fixedVertices.map(idx => {
+			return sharedSettings.mVertices.at(idx).mPosition.x;
+		});
 
 		// Optimize shared settings
 		sharedSettings.Optimize();
@@ -389,7 +402,8 @@ initJolt().then(function (Jolt) {
 
 		bodyCreationSettings.mObjectLayer = LAYER_MOVING;
 		bodyCreationSettings.mUpdatePosition = false;
-		let body = bodyInterface.CreateSoftBody(bodyCreationSettings);
+		bodyCreationSettings.mAllowSleeping = false;
+		let softBody = bodyInterface.CreateSoftBody(bodyCreationSettings);
 
 		/*rigidBodies.splice(0, rigidBodies.length)
 		rigidIndexes.splice(0, rigidIndexes.length)
@@ -403,7 +417,7 @@ initJolt().then(function (Jolt) {
 			sharedSettings.mVertices.at(idx).mPosition = rigidBodies[i].GetPosition();
 		} */
 
-		return body;
+		return softBody;
 	}
 
 	function updateVertexSettings(body, mesh) {
@@ -417,10 +431,7 @@ initJolt().then(function (Jolt) {
 		for (let i = 0; i < vertexSettings.size(); i++) {
 			softVertex.push(new Float32Array(Jolt.HEAP32.buffer, Jolt.getPointer(vertexSettings.at(i)) + positionOffset, 3));
 		}
-	
-		// Create a three mesh
-		let verts = mesh.geometry.getAttribute('position');
-	
+
 		mesh.userData.updateVertex = () => {
 
 			/* rigidIndexes.forEach((idx, i) => {
@@ -430,6 +441,9 @@ initJolt().then(function (Jolt) {
 				vertex.mPosition = rigidBodyPosition;
 			}) */
 
+			// Create a three mesh
+			let verts = mesh.geometry.getAttribute('position');
+	
 			for (let i = 0; i < softVertex.length; i++) {
 				verts.setX(i, softVertex[i][0]);
 				verts.setY(i, softVertex[i][1]);
@@ -446,7 +460,7 @@ initJolt().then(function (Jolt) {
 		planeGeo = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
 
 		updateGeometry(planeGeo);
-		let body = createPhysicsForCloth(planeGeo);
+		body = createPhysicsForCloth(planeGeo);
 	
 		mesh = new THREE.Mesh(planeGeo, material)
 		mesh.position.copy(wrapVec3(body.GetPosition()));
@@ -471,7 +485,7 @@ initJolt().then(function (Jolt) {
         mesh.material.map.repeat.set(xTile, yTile);
 		mesh.material.map.needsUpdate = true;
 
-		let body = createPhysicsForCloth(planeGeo);
+		body = createPhysicsForCloth(planeGeo);
 		mesh.userData.body = body;
 
 		bodyInterface.AddBody(body.GetID(), Jolt.EActivation_Activate);
@@ -480,6 +494,42 @@ initJolt().then(function (Jolt) {
 
 	function disposeSoftbody() {
 
+	}
+
+	function moveLeft(isLeft = true) {
+
+		const motionProperties = Jolt.castObject(body.GetMotionProperties(), Jolt.SoftBodyMotionProperties);
+
+		if(fixedVertices.length) {
+
+			// console.log(initialPositions)
+
+			const leftMostInitialX = initialPositions[0];
+			const rightMostInitialX = initialPositions[initialPositions.length - 1];
+
+			const leftMost = motionProperties.GetVertex(fixedVertices[0]);
+			const rightMost = motionProperties.GetVertex(fixedVertices[fixedVertices.length - 1]);
+
+			for (let i = 0; i < fixedVertices.length; i++) {
+				const vertexIdx = fixedVertices[i];
+				const vertex = motionProperties.GetVertex(vertexIdx);
+
+				// Calculate offset from center
+				const offset = i * 0.005; 
+				const openAmount = 0.15; 
+
+				if(isLeft && rightMost.mPosition.GetX() >= leftMost.mPosition.GetX() * 0.55) {
+					const updatedvalue = vertex.mPosition.GetX() - (offset * openAmount)
+					vertex.mPosition.SetX(updatedvalue);
+					// mesh.userData.updateVertex()
+				} else if(!isLeft && (rightMost.mPosition.GetX() <= rightMostInitialX)) {
+					const updatedvalue = vertex.mPosition.GetX() + (offset * openAmount)
+					vertex.mPosition.SetX(updatedvalue);
+					// mesh.userData.updateVertex()
+				}
+				
+			}
+		}
 	}
 
 	// Initialize this example
