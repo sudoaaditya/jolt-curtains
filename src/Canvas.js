@@ -47,7 +47,7 @@ initJolt().then(function (Jolt) {
     let height = 1.5;
     let segmentsMultiplier = 50;
     let widthSegments = Math.ceil( width * segmentsMultiplier);
-    let heightSegments = 10;
+    let heightSegments = 20;
 
 	let planeGeo = null;
 	let mesh = null;
@@ -217,7 +217,7 @@ initJolt().then(function (Jolt) {
 	function addToThreeScene(body, material, mesh = null) {
 		let threeObject = !mesh ? getThreeObjectForBody(body, material) : mesh;
 		threeObject.userData.body = body;
-		scene.add(threeObject);
+			scene.add(threeObject);
 		dynamicObjects.push(threeObject);
 	}
 
@@ -257,12 +257,8 @@ initJolt().then(function (Jolt) {
 	}
 
 	function getThreeObjectForBody(body, material) {
-		let threeObject;
 		let shape = body.GetShape();
-		if (body.GetBodyType() == Jolt.EBodyType_SoftBody)
-			threeObject = getSoftBodyMesh(body, material);
-		else
-			threeObject = new THREE.Mesh(createMeshForShape(shape), material);
+		let threeObject = new THREE.Mesh(createMeshForShape(shape), material);
 
 		threeObject.position.copy(wrapVec3(body.GetPosition()));
 		threeObject.quaternion.copy(wrapQuat(body.GetRotation()));
@@ -362,7 +358,7 @@ initJolt().then(function (Jolt) {
 			faces.push(face);
 		}
 
-		let sharedSettings = new Jolt.SoftBodySharedSettings;
+		let sharedSettings = new Jolt.SoftBodySharedSettings();
 		vertices.forEach(v => sharedSettings.mVertices.push_back(v));
 		faces.forEach(f => sharedSettings.AddFace(f));
 
@@ -460,9 +456,10 @@ initJolt().then(function (Jolt) {
 		planeGeo = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
 
 		updateGeometry(planeGeo);
-		body = createPhysicsForCloth(planeGeo);
 	
 		mesh = new THREE.Mesh(planeGeo, material)
+		
+		body = createPhysicsForCloth(planeGeo);
 		mesh.position.copy(wrapVec3(body.GetPosition()));
 		mesh.quaternion.copy(wrapQuat(body.GetRotation()));
 
