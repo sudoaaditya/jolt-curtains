@@ -46,8 +46,9 @@ initJolt().then(function (Jolt) {
     let width = 1;
     let height = 1.5;
     let segmentsMultiplier = 50;
+    let segmentsHtMultiplier = 20;
     let widthSegments = Math.ceil( width * segmentsMultiplier);
-    let heightSegments = 20;
+    let heightSegments = Math.ceil( height * segmentsHtMultiplier);
 
 	let planeGeo = null;
 	let mesh = null;
@@ -80,6 +81,7 @@ initJolt().then(function (Jolt) {
 
 	gui.add(params, 'height', 1, 5, 0.01).onChange(() => {
 		height = params.height;
+		heightSegments = Math.ceil(height * segmentsHtMultiplier);
 		updatePlaneSize()
 	});
 
@@ -184,7 +186,7 @@ initJolt().then(function (Jolt) {
 
 		// Don't go below 30 Hz to prevent spiral of death
 		var deltaTime = clock.getDelta();
-		deltaTime = Math.min(deltaTime, 1.0 / 30.0);
+		deltaTime = Math.min(deltaTime, 1.0 / 60.0);
 
 		if (onExampleUpdate != null)
 			onExampleUpdate(time, deltaTime);
